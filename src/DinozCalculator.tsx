@@ -11,7 +11,6 @@ export enum Monster {
     GLUON = 'GLUON',
     GREEN_GIANT = 'GREEN_GIANT',
     COQDUR = 'COQDUR',
-    PIRASK = 'PIRASK',
     FLAM = 'FLAM',
     GOBLIN = 'GOBLIN',
     BARCHE = 'BARCHE',
@@ -245,31 +244,6 @@ export const monsterList: Readonly<Record<Monster, MonsterFiche>> = {
         zones: [MapZone.DINOLAND],
         canBeCaptured: true,
         display: 'coq'
-    },
-    [Monster.PIRASK]: {
-        id: Monster.PIRASK,
-        name: 'pirask',
-        hp: 15,
-        elements: {
-            fire: 0,
-            wood: 0,
-            water: 0,
-            lightning: 0,
-            air: 0
-        },
-        bonus_attack: 50,
-        bonus_defense: 30,
-        resilience: 40,
-        odds: 250,
-        level: 15,
-        zones: [MapZone.DINOLAND],
-                groups: [
-            { quantity: 0, odds: 0 },
-            { quantity: 1, odds: 0 },
-            { quantity: 2, odds: 1 }
-        ],
-        canBeCaptured: true,
-        display: 'piraos'
     },
     [Monster.FLAM]: {
         id: Monster.FLAM,
@@ -998,10 +972,21 @@ function rewardFight(team: { level: number }[], monsters: MonsterFiche[]): {
     teamXP.push({ level: d.level, xp: xp });
   }
 
-  const teamSizeMalus = 0.95 - 0.05 * (team.length - 1);
-  let goldMultiplier = 1;
-  const malus = fgold > teamSizeMalus ? fgold * teamSizeMalus : teamSizeMalus;
-  gold = Math.round(gold * goldMultiplier * goldFactor * Math.max(malus, fgold));
+	const fprob = getRandomNumber(0, 100);
+	let goldMultiplier = 1;
+	if (fprob < 1) goldMultiplier = 10;
+	else if (fprob < 11) goldMultiplier = 3;
+	// Gold multiplier average: 1.29
+	// Gold base * multiplier: 610 * 1.29 = 786.9
+
+	// Malus based on size of team starting size 2
+	// Size 2: 0.5 - Size 3: 0.45 - Size 4: 0.445 - Size 5: 0.4445 etc.
+	let teamSizeMalus = 1;
+	for (let i = 2; i <= team.length; i++) {
+		teamSizeMalus -= 0.5 * Math.pow(0.1, i - 2);
+	}
+	const malus = fgold >= 1 ? fgold * teamSizeMalus : fgold;
+	gold = Math.round(gold * goldMultiplier * goldFactor * malus);
 
   return { gold, totalWinXP, teamXP };
 }
