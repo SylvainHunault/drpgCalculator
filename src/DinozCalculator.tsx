@@ -11,7 +11,6 @@ export enum Monster {
     GLUON = 'GLUON',
     GREEN_GIANT = 'GREEN_GIANT',
     COQDUR = 'COQDUR',
-    PIRASK = 'PIRASK',
     FLAM = 'FLAM',
     GOBLIN = 'GOBLIN',
     BARCHE = 'BARCHE',
@@ -245,31 +244,6 @@ export const monsterList: Readonly<Record<Monster, MonsterFiche>> = {
         zones: [MapZone.DINOLAND],
         canBeCaptured: true,
         display: 'coq'
-    },
-    [Monster.PIRASK]: {
-        id: Monster.PIRASK,
-        name: 'pirask',
-        hp: 15,
-        elements: {
-            fire: 0,
-            wood: 0,
-            water: 0,
-            lightning: 0,
-            air: 0
-        },
-        bonus_attack: 50,
-        bonus_defense: 30,
-        resilience: 40,
-        odds: 250,
-        level: 15,
-        zones: [MapZone.DINOLAND],
-                groups: [
-            { quantity: 0, odds: 0 },
-            { quantity: 1, odds: 0 },
-            { quantity: 2, odds: 1 }
-        ],
-        canBeCaptured: true,
-        display: 'piraos'
     },
     [Monster.FLAM]: {
         id: Monster.FLAM,
