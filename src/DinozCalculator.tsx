@@ -972,12 +972,9 @@ function rewardFight(team: { level: number }[], monsters: MonsterFiche[]): {
     teamXP.push({ level: d.level, xp: xp });
   }
 
-	const fprob = getRandomNumber(0, 100);
-	let goldMultiplier = 1;
-	if (fprob < 1) goldMultiplier = 10;
-	else if (fprob < 11) goldMultiplier = 3;
+	let goldMultiplier = 1.29;
 	// Gold multiplier average: 1.29
-	// Gold base * multiplier: 610 * 1.29 = 786.9
+	// Gold base * multiplier: (180 + 430) * 1.29 = 786.9
 
 	// Malus based on size of team starting size 2
 	// Size 2: 0.5 - Size 3: 0.45 - Size 4: 0.445 - Size 5: 0.4445 etc.
@@ -1112,10 +1109,14 @@ function generateMonsterList(team: { level: number }[], place: MapZone): Monster
   return monsterArray;
 }
 
-function getMonsterProbabilities(team: { level: number }[]): { monster: MonsterFiche; probability: number }[] {
+function getMonsterProbabilities(team: { level: number }[], map: MapZone): { monster: MonsterFiche; probability: number }[] {
   const greatestFighterLevel = Math.max(...team.map(d => d.level));
   
   const monsters = Object.values(monsterList)
+    .filter(m => {
+      // Filter monsters by zones
+      return m.zones.includes(map);
+    })
     .map(m => ({
       monster: m,
       p: monsterLevelProba(greatestFighterLevel, m.odds, m.level)
@@ -1142,7 +1143,7 @@ export default function DinozCalculator() {
   }>>(new Map());
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationIterations, setSimulationIterations] = useState(10000);
-    const [selectedZone, setSelectedZone] = useState<MapZone>(MapZone.DINOLAND);
+  const [selectedZone, setSelectedZone] = useState<MapZone>(MapZone.DINOLAND);
 
   const addDinoz = () => {
     if (team.length < 5) {
@@ -1164,9 +1165,9 @@ export default function DinozCalculator() {
   };
 
   const calculateIndividualProbabilities = useCallback(() => {
-    const probs = getMonsterProbabilities(team);
+    const probs = getMonsterProbabilities(team, selectedZone);
     setIndividualProbs(probs);
-  }, [team]);
+  }, [team, selectedZone]);
 
   const runCompositionSimulation = async () => {
     setIsSimulating(true);
@@ -1340,19 +1341,19 @@ export default function DinozCalculator() {
               Probabilités individuelles
             </button>
 
-              <select
-                  id="zoneSelect"
-                  value={selectedZone}
-                  onChange={(e) => setSelectedZone(e.target.value as MapZone)}
-                  className="border rounded p-2"
-              >
-                  <option value="">-- Sélectionnez --</option>
-                  {Object.values(MapZone).map((zone) => (
-                      <option key={zone} value={zone}>
-                          {zone}
-                      </option>
-                  ))}
-              </select>
+            <select
+                id="zoneSelect"
+                value={selectedZone}
+                onChange={(e) => setSelectedZone(e.target.value as MapZone)}
+                className="border rounded p-2"
+            >
+                <option value="">-- Sélectionnez --</option>
+                {Object.values(MapZone).map((zone) => (
+                    <option key={zone} value={zone}>
+                        {zone}
+                    </option>
+                ))}
+            </select>
 
             <div className="flex items-center gap-2">
               <input
