@@ -1,5 +1,8 @@
-import { useState, useCallback } from 'react';
-import { Calculator, Users, Zap, Target, Info, BarChart3 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Calculator, Map as MapIcon, Settings2, Info, ChevronDown, ChevronUp, X } from 'lucide-react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts';
 
 // Types exacts basés sur le code fourni
 // @ts-ignore
@@ -881,7 +884,10 @@ export const monsterList: Readonly<Record<Monster, MonsterFiche>> = {
     }
 };
 
-// Fonctions exactes du code original
+// ============================================================
+// Fonctions de calcul (exactes du code original, paramétrées)
+// ============================================================
+
 function monsterLevelProba(dinozLevel: number, p: number, monsterLvl: number): number {
   let delta = dinozLevel - monsterLvl;
   if (delta < 0) {
@@ -910,7 +916,6 @@ function weightedRandom<T extends { odds: number }>(items: T[], totalOdds: numbe
   return items[i];
 }
 
-// Fonctions de récompense basées sur le code fourni
 function getRandomNumber(min: number, max: number): number {
   min = Math.ceil(min);
   max = Math.floor(max);
@@ -936,7 +941,12 @@ const calculatePvExp = (
   return Math.round(totalMonsterXp * xpFactor * XP_MULTIPLICATOR);
 };
 
-function rewardFight(team: { level: number }[], monsters: MonsterFiche[]): {
+function rewardFight(
+  team: { level: number }[],
+  monsters: MonsterFiche[],
+  baseGold: number,
+  randomGoldMax: number
+): {
   gold: number;
   totalWinXP: number;
   teamXP: { level: number; xp: number }[];
@@ -958,7 +968,7 @@ function rewardFight(team: { level: number }[], monsters: MonsterFiche[]): {
       const factor = f.level >= d.level ? 1 : 4 / (4 + (d.level - f.level));
       let monsterXp = (f.xp ?? 10) * factor * cur;
       fgold += (f.gold ?? 1.0) * factor * cur * gfact;
-      
+
       // newbie bonus
       if (d.level <= 5) monsterXp += XP_NEWB_BONUS[d.level - 1] * cur;
       // bonus for fighters of same level of the monster
@@ -968,114 +978,46 @@ function rewardFight(team: { level: number }[], monsters: MonsterFiche[]): {
 
     xp = calculatePvExp(xp, d.level, 50, 50);
     totalWinXP += xp;
-    gold += (getRandomNumber(0, 36) + 43) * 10;
+    gold += (getRandomNumber(0, randomGoldMax) + baseGold) * 10;
     teamXP.push({ level: d.level, xp: xp });
   }
 
-	const fprob = getRandomNumber(0, 100);
-	let goldMultiplier = 1;
-	if (fprob < 1) goldMultiplier = 10;
-	else if (fprob < 11) goldMultiplier = 3;
-	// Gold multiplier average: 1.29
-	// Gold base * multiplier: 610 * 1.29 = 786.9
-
-	// Malus based on size of team starting size 2
-	// Size 2: 0.5 - Size 3: 0.45 - Size 4: 0.445 - Size 5: 0.4445 etc.
-	let teamSizeMalus = 1;
-	for (let i = 2; i <= team.length; i++) {
-		teamSizeMalus -= 0.5 * Math.pow(0.1, i - 2);
-	}
-	const malus = fgold >= 1 ? fgold * teamSizeMalus : fgold;
-	gold = Math.round(gold * goldMultiplier * goldFactor * malus);
+  const goldMultiplier = 1.29;
+  // Malus based on size of team starting size 2
+  let teamSizeMalus = 1;
+  for (let i = 2; i <= team.length; i++) {
+    teamSizeMalus -= 0.5 * Math.pow(0.1, i - 2);
+  }
+  const malus = fgold >= 1 ? fgold * teamSizeMalus : fgold;
+  gold = Math.round(gold * goldMultiplier * goldFactor * malus);
 
   return { gold, totalWinXP, teamXP };
 }
 
-// Simulation de la génération de monstre avec calcul des récompenses
-function simulateMonsterGeneration(team: { level: number }[], iterations: number = 10000, map: MapZone): Map<string, {
-  count: number;
-  avgGold: number;
-  avgTotalXP: number;
-  avgTeamXP: { level: number; avgXP: number }[];
-}> {
-  const results = new Map<string, {
-    count: number;
-    totalGold: number;
-    totalXP: number;
-    teamXPSums: { level: number; totalXP: number }[];
-  }>();
-  
-  for (let sim = 0; sim < iterations; sim++) {
-    const monsters = generateMonsterList(team, map);
-    const composition = monsters.map(m => m.id).sort().join(',');
-    const rewards = rewardFight(team, monsters);
-    
-    if (!results.has(composition)) {
-      results.set(composition, {
-        count: 0,
-        totalGold: 0,
-        totalXP: 0,
-        teamXPSums: team.map(d => ({ level: d.level, totalXP: 0 }))
-      });
-    }
-    
-    const entry = results.get(composition)!;
-    entry.count++;
-    entry.totalGold += rewards.gold;
-    entry.totalXP += rewards.totalWinXP;
-    
-    rewards.teamXP.forEach((xp, i) => {
-      entry.teamXPSums[i].totalXP += xp.xp;
-    });
-  }
-  
-  // Convertir en moyennes
-  const finalResults = new Map<string, {
-    count: number;
-    avgGold: number;
-    avgTotalXP: number;
-    avgTeamXP: { level: number; avgXP: number }[];
-  }>();
-  
-  for (const [composition, data] of results) {
-    finalResults.set(composition, {
-      count: data.count,
-      avgGold: Math.round(data.totalGold / data.count),
-      avgTotalXP: Math.round(data.totalXP / data.count),
-      avgTeamXP: data.teamXPSums.map(xp => ({
-        level: xp.level,
-        avgXP: Math.round(xp.totalXP / data.count)
-      }))
-    });
-  }
-  
-  return finalResults;
-}
-
-function generateMonsterList(team: { level: number }[], place: MapZone): MonsterFiche[] {
+function generateMonsterList(
+  team: { level: number }[],
+  place: MapZone,
+  monsterListData: Readonly<Record<Monster, MonsterFiche>>
+): MonsterFiche[] {
   let teamPowerLevel = 0;
   let greatestFighterLevel = 0;
-  
+
   for (const dinoz of team) {
     teamPowerLevel += dinoz.level;
     if (dinoz.level > greatestFighterLevel) greatestFighterLevel = dinoz.level;
   }
-  
+
   const diff = (team.length + 2) / (team.length * 2 + 1);
   teamPowerLevel = Math.round(teamPowerLevel * diff);
 
-  const monsters = Object.values(monsterList)
-      .filter(m => {
-          // Filter monsters by zones
-          return m.zones.includes(place);
-      })
+  const monsters = Object.values(monsterListData)
+    .filter(m => m.zones.includes(place))
     .map(m => ({
       monster: m,
       p: monsterLevelProba(greatestFighterLevel, m.odds, m.level)
     }))
     .filter(m => m.p > 0);
 
-  let monsterLevel = 0;
   const monsterArray: MonsterFiche[] = [];
   let total = monsters.reduce((acc, m) => acc + m.p, 0);
 
@@ -1086,19 +1028,24 @@ function generateMonsterList(team: { level: number }[], place: MapZone): Monster
     total = monsters.length * 100;
   }
 
+  if (monsters.length === 0) {
+    return monsterArray;
+  }
+
   const mdelta = Math.max(Math.round(teamPowerLevel / 4), 2);
-  
+  let monsterLevel = 0;
+
   while (monsterLevel < teamPowerLevel) {
     const ml = monsters.map(a => ({ monster: a.monster, odds: a.p }));
     const m = weightedRandom(ml, total).monster;
-    
+
     let count = 1;
     if (m.groups) {
       const totalGroup = m.groups.reduce((acc, item) => acc + item.odds, 0);
       const weightedGroup = weightedRandom(m.groups, totalGroup).quantity;
       count += weightedGroup;
     }
-    
+
     for (let i = 0; i < count; i++) {
       monsterLevel += m.level;
       monsterArray.push(m);
@@ -1112,80 +1059,272 @@ function generateMonsterList(team: { level: number }[], place: MapZone): Monster
   return monsterArray;
 }
 
-function getMonsterProbabilities(team: { level: number }[]): { monster: MonsterFiche; probability: number }[] {
-  const greatestFighterLevel = Math.max(...team.map(d => d.level));
-  
-  const monsters = Object.values(monsterList)
-    .map(m => ({
-      monster: m,
-      p: monsterLevelProba(greatestFighterLevel, m.odds, m.level)
-    }))
-    .filter(m => m.p > 0);
+// Simulation légère : uniquement les moyennes (gold/xp), pour le tracé des courbes
+function simulateAverages(
+  team: { level: number }[],
+  iterations: number,
+  place: MapZone,
+  monsterListData: Readonly<Record<Monster, MonsterFiche>>,
+  baseGold: number,
+  randomGoldMax: number
+): { avgGoldPerDinoz: number; avgXpPerDinoz: number } {
+  let totalGold = 0;
+  let totalXP = 0;
 
-  const total = monsters.reduce((acc, m) => acc + m.p, 0);
-  
-  return monsters.map(m => ({
-    monster: m.monster,
-    probability: total > 0 ? (m.p / total) * 100 : 0
-  }));
+  for (let i = 0; i < iterations; i++) {
+    const monsters = generateMonsterList(team, place, monsterListData);
+    const rewards = rewardFight(team, monsters, baseGold, randomGoldMax);
+    totalGold += rewards.gold;
+    totalXP += rewards.totalWinXP;
+  }
+
+  return {
+    avgGoldPerDinoz: totalGold / iterations / team.length,
+    avgXpPerDinoz: totalXP / iterations / team.length
+  };
 }
 
-export default function DinozCalculator() {
-  const [team, setTeam] = useState([{ level: 1 }]);
-  const [targetComposition, setTargetComposition] = useState<Monster[]>([]);
-  const [individualProbs, setIndividualProbs] = useState<{ monster: MonsterFiche; probability: number }[]>([]);
-  const [compositionResults, setCompositionResults] = useState<Map<string, {
+// Simulation complète avec détail des compositions (pour le panneau "clic sur un point")
+function simulateMonsterGeneration(
+  team: { level: number }[],
+  iterations: number,
+  place: MapZone,
+  monsterListData: Readonly<Record<Monster, MonsterFiche>>,
+  baseGold: number,
+  randomGoldMax: number
+): Map<string, {
+  count: number;
+  avgGold: number;
+  avgTotalXP: number;
+  avgTeamXP: { level: number; avgXP: number }[];
+}> {
+  const results = new Map<string, {
+    count: number;
+    totalGold: number;
+    totalXP: number;
+    teamXPSums: { level: number; totalXP: number }[];
+  }>();
+
+  for (let sim = 0; sim < iterations; sim++) {
+    const monsters = generateMonsterList(team, place, monsterListData);
+    const composition = monsters.map(m => m.id).sort().join(',') || '(aucun monstre)';
+    const rewards = rewardFight(team, monsters, baseGold, randomGoldMax);
+
+    if (!results.has(composition)) {
+      results.set(composition, {
+        count: 0,
+        totalGold: 0,
+        totalXP: 0,
+        teamXPSums: team.map(d => ({ level: d.level, totalXP: 0 }))
+      });
+    }
+
+    const entry = results.get(composition)!;
+    entry.count++;
+    entry.totalGold += rewards.gold;
+    entry.totalXP += rewards.totalWinXP;
+
+    rewards.teamXP.forEach((xp, i) => {
+      entry.teamXPSums[i].totalXP += xp.xp;
+    });
+  }
+
+  const finalResults = new Map<string, {
     count: number;
     avgGold: number;
     avgTotalXP: number;
     avgTeamXP: { level: number; avgXP: number }[];
-  }>>(new Map());
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [simulationIterations, setSimulationIterations] = useState(10000);
-    const [selectedZone, setSelectedZone] = useState<MapZone>(MapZone.DINOLAND);
+  }>();
 
-  const addDinoz = () => {
-    if (team.length < 5) {
-      setTeam([...team, { level: 1 }]);
+  for (const [composition, data] of results) {
+    finalResults.set(composition, {
+      count: data.count,
+      avgGold: Math.round(data.totalGold / data.count),
+      avgTotalXP: Math.round(data.totalXP / data.count),
+      avgTeamXP: data.teamXPSums.map(xp => ({
+        level: xp.level,
+        avgXP: Math.round(xp.totalXP / data.count)
+      }))
+    });
+  }
+
+  return finalResults;
+}
+
+// ============================================================
+// Configuration UI
+// ============================================================
+
+const ALL_ZONES = Object.values(MapZone) as MapZone[];
+
+const ZONE_LABELS: Record<string, string> = {
+  [MapZone.DINOLAND]: 'Dinoland',
+  [MapZone.DINOWEST]: 'Dinoland Ouest',
+  [MapZone.JUNGLE]: 'Jungle',
+  [MapZone.ILES]: 'Îles',
+  [MapZone.GTOUTCHAUD]: 'Grand Tout Chaud',
+  [MapZone.STEPPE]: 'Steppes',
+  [MapZone.DARKWORLD]: 'DarkWorld'
+};
+
+const GROUP_SIZES = [1, 2, 3, 4, 5, 6];
+
+const GROUP_COLORS: Record<number, string> = {
+  1: '#6366f1',
+  2: '#22c55e',
+  3: '#f59e0b',
+  4: '#ef4444',
+  5: '#06b6d4',
+  6: '#a855f7'
+};
+
+type MonsterOverride = { level: number; xp: number; xpBonus: number; odds: number };
+
+function buildInitialOverrides(): Record<string, MonsterOverride> {
+  const result: Record<string, MonsterOverride> = {};
+  (Object.keys(monsterList) as Monster[]).forEach(id => {
+    const m = monsterList[id];
+    result[id] = { level: m.level, xp: m.xp ?? 10, xpBonus: m.xpBonus ?? 0, odds: m.odds };
+  });
+  return result;
+}
+
+function applyOverrides(overrides: Record<string, MonsterOverride>): Record<Monster, MonsterFiche> {
+  const result = {} as Record<Monster, MonsterFiche>;
+  (Object.keys(monsterList) as Monster[]).forEach(id => {
+    const base = monsterList[id];
+    const o = overrides[id];
+    result[id] = { ...base, level: o.level, xp: o.xp, xpBonus: o.xpBonus, odds: o.odds };
+  });
+  return result;
+}
+
+type PlotPoint = { level: number } & Record<string, number>;
+
+export default function DinozCalculator() {
+  const [selectedZones, setSelectedZones] = useState<MapZone[]>([MapZone.DINOLAND]);
+  const [selectedGroupSizes, setSelectedGroupSizes] = useState<number[]>([1]);
+  const [iterations, setIterations] = useState(500);
+
+  const [monsterOverrides, setMonsterOverrides] = useState<Record<string, MonsterOverride>>(buildInitialOverrides());
+  const [baseGold, setBaseGold] = useState(43);
+  const [randomGoldMax, setRandomGoldMax] = useState(36);
+  const [showMonsterParams, setShowMonsterParams] = useState(false);
+
+  const [displayMetric, setDisplayMetric] = useState<'xp' | 'gold'>('xp');
+
+  const [plotData, setPlotData] = useState<Record<string, PlotPoint[]>>({});
+  const [calculatedZones, setCalculatedZones] = useState<MapZone[]>([]);
+  const [calculatedGroupSizes, setCalculatedGroupSizes] = useState<number[]>([]);
+
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const [selectedPoint, setSelectedPoint] = useState<{ zone: MapZone; groupSize: number; level: number } | null>(null);
+  const [pointResults, setPointResults] = useState<Map<string, {
+    count: number;
+    avgGold: number;
+    avgTotalXP: number;
+    avgTeamXP: { level: number; avgXP: number }[];
+  }> | null>(null);
+  const [isSimulatingPoint, setIsSimulatingPoint] = useState(false);
+
+  const effectiveMonsterList = useMemo(() => applyOverrides(monsterOverrides), [monsterOverrides]);
+
+  const toggleZone = (zone: MapZone) => {
+    setSelectedZones(prev =>
+      prev.includes(zone) ? prev.filter(z => z !== zone) : [...prev, zone]
+    );
+  };
+
+  const toggleGroupSize = (size: number) => {
+    setSelectedGroupSizes(prev =>
+      prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size].sort((a, b) => a - b)
+    );
+  };
+
+  const selectAllGroupSizes = () => setSelectedGroupSizes([...GROUP_SIZES]);
+
+  const updateMonsterOverride = (id: string, field: keyof MonsterOverride, value: number) => {
+    setMonsterOverrides(prev => ({
+      ...prev,
+      [id]: { ...prev[id], [field]: value }
+    }));
+  };
+
+  const runCalculation = async () => {
+    if (selectedZones.length === 0 || selectedGroupSizes.length === 0 || isCalculating) return;
+
+    setIsCalculating(true);
+    setProgress(0);
+    setSelectedPoint(null);
+    setPointResults(null);
+
+    const zones = [...selectedZones];
+    const sizes = [...selectedGroupSizes];
+    const monsterListData = effectiveMonsterList;
+    const bGold = baseGold;
+    const rGoldMax = randomGoldMax;
+    const iters = Math.max(1, iterations);
+
+    const newPlotData: Record<string, PlotPoint[]> = {};
+    for (const zone of zones) {
+      newPlotData[zone] = Array.from({ length: 50 }, (_, i) => ({ level: i + 1 }));
     }
-  };
 
-  const removeDinoz = (index: number) => {
-    if (team.length > 1) {
-      const newTeam = team.filter((_, i) => i !== index);
-      setTeam(newTeam);
+    const totalCombos = zones.length * sizes.length * 50;
+    let done = 0;
+
+    for (const zone of zones) {
+      for (const size of sizes) {
+        for (let level = 1; level <= 50; level++) {
+          const team = Array.from({ length: size }, () => ({ level }));
+          const { avgGoldPerDinoz, avgXpPerDinoz } = simulateAverages(
+            team, iters, zone, monsterListData, bGold, rGoldMax
+          );
+          const point = newPlotData[zone][level - 1];
+          point[`g${size}_gold`] = Math.round(avgGoldPerDinoz);
+          point[`g${size}_xp`] = Math.round(avgXpPerDinoz);
+
+          done++;
+          if (done % 4 === 0 || done === totalCombos) {
+            setProgress(Math.round((done / totalCombos) * 100));
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+        }
+      }
     }
+
+    setPlotData(newPlotData);
+    setCalculatedZones(zones);
+    setCalculatedGroupSizes(sizes);
+    setIsCalculating(false);
   };
 
-  const updateDinozLevel = (index: number, level: number) => {
-    const newTeam = [...team];
-    newTeam[index].level = Math.max(1, Math.min(50, level));
-    setTeam(newTeam);
-  };
+  const handlePointClick = async (zone: MapZone, groupSize: number, level: number) => {
+    setSelectedPoint({ zone, groupSize, level });
+    setIsSimulatingPoint(true);
+    setPointResults(null);
 
-  const calculateIndividualProbabilities = useCallback(() => {
-    const probs = getMonsterProbabilities(team);
-    setIndividualProbs(probs);
-  }, [team]);
-
-  const runCompositionSimulation = async () => {
-    setIsSimulating(true);
-    setCompositionResults(new Map());
-    
-    // Simulation par chunks pour ne pas bloquer l'UI
+    const team = Array.from({ length: groupSize }, () => ({ level }));
+    const iters = Math.max(1, iterations);
     const chunkSize = 1000;
-    const totalChunks = Math.ceil(simulationIterations / chunkSize);
+    const totalChunks = Math.ceil(iters / chunkSize);
+    const monsterListData = effectiveMonsterList;
+    const bGold = baseGold;
+    const rGoldMax = randomGoldMax;
+
     const allResults = new Map<string, {
       count: number;
       totalGold: number;
       totalXP: number;
       teamXPSums: { level: number; totalXP: number }[];
     }>();
-    
+
     for (let chunk = 0; chunk < totalChunks; chunk++) {
-      const chunkIterations = Math.min(chunkSize, simulationIterations - chunk * chunkSize);
-      const chunkResults = simulateMonsterGeneration(team, chunkIterations, selectedZone);
-      
+      const chunkIterations = Math.min(chunkSize, iters - chunk * chunkSize);
+      const chunkResults = simulateMonsterGeneration(team, chunkIterations, zone, monsterListData, bGold, rGoldMax);
+
       for (const [composition, data] of chunkResults) {
         if (!allResults.has(composition)) {
           allResults.set(composition, {
@@ -1195,29 +1334,24 @@ export default function DinozCalculator() {
             teamXPSums: team.map(d => ({ level: d.level, totalXP: 0 }))
           });
         }
-        
         const entry = allResults.get(composition)!;
         entry.count += data.count;
         entry.totalGold += data.avgGold * data.count;
         entry.totalXP += data.avgTotalXP * data.count;
-        
         data.avgTeamXP.forEach((xp, i) => {
           entry.teamXPSums[i].totalXP += xp.avgXP * data.count;
         });
       }
-      
-      // Petite pause pour laisser l'UI se rafraîchir
       await new Promise(resolve => setTimeout(resolve, 0));
     }
-    
-    // Convertir en moyennes finales
+
     const finalResults = new Map<string, {
       count: number;
       avgGold: number;
       avgTotalXP: number;
       avgTeamXP: { level: number; avgXP: number }[];
     }>();
-    
+
     for (const [composition, data] of allResults) {
       finalResults.set(composition, {
         count: data.count,
@@ -1229,46 +1363,23 @@ export default function DinozCalculator() {
         }))
       });
     }
-    
-    setCompositionResults(finalResults);
-    setIsSimulating(false);
+
+    setPointResults(finalResults);
+    setIsSimulatingPoint(false);
   };
 
-  const toggleMonsterInComposition = (monsterId: Monster) => {
-    const newComposition = targetComposition.includes(monsterId)
-      ? targetComposition.filter(id => id !== monsterId)
-      : [...targetComposition, monsterId];
-    setTargetComposition(newComposition);
-  };
-
-  const getTargetCompositionProbability = () => {
-    if (targetComposition.length === 0 || compositionResults.size === 0) return 0;
-    
-    const targetKey = targetComposition.sort().join(',');
-    const data = compositionResults.get(targetKey);
-    const count = data?.count || 0;
-    const total = Array.from(compositionResults.values()).reduce((sum, val) => sum + val.count, 0);
-    return total > 0 ? (count / total) * 100 : 0;
-  };
-
-  const getTargetCompositionRewards = () => {
-    if (targetComposition.length === 0 || compositionResults.size === 0) return null;
-    
-    const targetKey = targetComposition.sort().join(',');
-    return compositionResults.get(targetKey) || null;
-  };
-
-  const teamPowerLevel = team.reduce((sum, dinoz) => sum + dinoz.level, 0);
-  const diff = (team.length + 2) / (team.length * 2 + 1);
-  const adjustedPowerLevel = Math.round(teamPowerLevel * diff);
-  const averageLevel = teamPowerLevel / team.length;
-
-  const sortedCompositions = Array.from(compositionResults.entries())
-    .sort(([,a], [,b]) => b.count - a.count)
-    .slice(0, 20); // Top 20 compositions les plus probables
-    const totalResult = Array.from(compositionResults.values()).reduce((sum, val) => sum + val.count, 0)
-    const averageGold = Array.from(compositionResults.values()).reduce((a,b) => a + (b.avgGold * b.count / totalResult), 0)
-    const averageTotalXP = Array.from(compositionResults.values()).reduce((a,b) => a + (b.avgTotalXP * b.count / totalResult), 0)
+  const sortedPointCompositions = pointResults
+    ? Array.from(pointResults.entries()).sort(([, a], [, b]) => b.count - a.count).slice(0, 15)
+    : [];
+  const pointTotal = pointResults
+    ? Array.from(pointResults.values()).reduce((sum, v) => sum + v.count, 0)
+    : 0;
+  const pointAvgGold = pointResults && pointTotal > 0
+    ? Array.from(pointResults.values()).reduce((a, b) => a + (b.avgGold * b.count) / pointTotal, 0)
+    : 0;
+  const pointAvgXP = pointResults && pointTotal > 0
+    ? Array.from(pointResults.values()).reduce((a, b) => a + (b.avgTotalXP * b.count) / pointTotal, 0)
+    : 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -1276,346 +1387,386 @@ export default function DinozCalculator() {
         <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
           <div className="flex items-center gap-3 mb-6">
             <Calculator className="text-indigo-600" size={32} />
-            <h1 className="text-3xl font-bold text-gray-800">Calculateur de Probabilités Dinoz</h1>
+            <h1 className="text-3xl font-bold text-gray-800">Calculateur de Gains Dinoz</h1>
           </div>
 
-          {/* Configuration de l'équipe */}
+          {/* Zones */}
           <div className="mb-8">
             <div className="flex items-center gap-2 mb-4">
-              <Users className="text-blue-600" size={24} />
-              <h2 className="text-xl font-semibold text-gray-700">Configuration de l'équipe</h2>
+              <MapIcon className="text-blue-600" size={22} />
+              <h2 className="text-xl font-semibold text-gray-700">Zones</h2>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
-              {team.map((dinoz, index) => (
-                <div key={index} className="bg-blue-50 p-4 rounded-lg border">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Dinoz {index + 1}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      max="50"
-                      value={dinoz.level}
-                      onChange={(e) => updateDinozLevel(index, parseInt(e.target.value) || 1)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    {team.length > 1 && (
-                      <button
-                        onClick={() => removeDinoz(index)}
-                        className="px-2 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex gap-4 items-center flex-wrap">
-              {team.length < 5 && (
-                <button
-                  onClick={addDinoz}
-                  className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {ALL_ZONES.map(zone => (
+                <label
+                  key={zone}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
+                    selectedZones.includes(zone)
+                      ? 'bg-indigo-50 border-indigo-400 text-indigo-800'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                  }`}
                 >
-                  Ajouter un Dinoz
-                </button>
-              )}
-              
-              <div className="text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded-lg">
-                <div>Niveau total: {teamPowerLevel} | Niveau moyen: {averageLevel.toFixed(1)}</div>
-                <div>Niveau ajusté: {adjustedPowerLevel} (facteur: {diff.toFixed(3)})</div>
-              </div>
+                  <input
+                    type="checkbox"
+                    className="accent-indigo-600"
+                    checked={selectedZones.includes(zone)}
+                    onChange={() => toggleZone(zone)}
+                  />
+                  <span className="text-sm font-medium">{ZONE_LABELS[zone] ?? zone}</span>
+                </label>
+              ))}
             </div>
           </div>
 
-          <div className="flex gap-4 mb-6">
-            <button
-              onClick={calculateIndividualProbabilities}
-              className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold flex items-center gap-2"
-            >
-              <BarChart3 size={20} />
-              Probabilités individuelles
-            </button>
-
-              <select
-                  id="zoneSelect"
-                  value={selectedZone}
-                  onChange={(e) => setSelectedZone(e.target.value as MapZone)}
-                  className="border rounded p-2"
-              >
-                  <option value="">-- Sélectionnez --</option>
-                  {Object.values(MapZone).map((zone) => (
-                      <option key={zone} value={zone}>
-                          {zone}
-                      </option>
-                  ))}
-              </select>
-
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="1000"
-                max="100000"
-                step="1000"
-                value={simulationIterations}
-                onChange={(e) => setSimulationIterations(parseInt(e.target.value) || 10000)}
-                className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+          {/* Tailles de groupe */}
+          <div className="mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-700">Tailles de groupe</h2>
               <button
-                onClick={runCompositionSimulation}
-                disabled={isSimulating}
-                className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold flex items-center gap-2 disabled:opacity-50"
+                onClick={selectAllGroupSizes}
+                className="text-sm px-3 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 font-medium"
               >
-                <Zap size={20} />
-                {isSimulating ? 'Simulation...' : 'Simuler compositions'}
+                Tout sélectionner
               </button>
             </div>
+            <div className="flex flex-wrap gap-3">
+              {GROUP_SIZES.map(size => (
+                <label
+                  key={size}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border cursor-pointer transition-colors ${
+                    selectedGroupSizes.includes(size)
+                      ? 'border-2'
+                      : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                  }`}
+                  style={selectedGroupSizes.includes(size) ? {
+                    backgroundColor: `${GROUP_COLORS[size]}1a`,
+                    borderColor: GROUP_COLORS[size],
+                    color: GROUP_COLORS[size]
+                  } : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedGroupSizes.includes(size)}
+                    onChange={() => toggleGroupSize(size)}
+                  />
+                  <span className="text-sm font-medium">{size} Dinoz</span>
+                </label>
+              ))}
+            </div>
           </div>
+
+          {/* Itérations + calcul */}
+          <div className="flex flex-wrap items-end gap-4 mb-2">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Itérations par point (niveau × taille × zone)
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={iterations}
+                onChange={(e) => setIterations(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-48 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              />
+            </div>
+
+            <button
+              onClick={runCalculation}
+              disabled={isCalculating || selectedZones.length === 0 || selectedGroupSizes.length === 0}
+              className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {isCalculating ? `Calcul en cours… ${progress}%` : 'Calculer'}
+            </button>
+
+            {isCalculating && (
+              <div className="flex-1 min-w-[160px] h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-indigo-600 transition-all"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-gray-500">
+            Nombre total de combats simulés : {(selectedZones.length * selectedGroupSizes.length * 50 * Math.max(1, iterations)).toLocaleString()}.
+            Un nombre élevé de zones/tailles/itérations augmente le temps de calcul.
+          </p>
         </div>
 
-        {/* Probabilités individuelles */}
-        {individualProbs.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Probabilités individuelles de sélection</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-              {individualProbs.map((result, index) => (
-                <div 
-                  key={index}
-                  className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                    targetComposition.includes(result.monster.id)
-                      ? 'border-indigo-500 bg-indigo-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                  onClick={() => toggleMonsterInComposition(result.monster.id)}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-semibold text-gray-800">{result.monster.name}</h3>
-                    <span className="text-xs bg-gray-200 px-2 py-1 rounded">Niv. {result.monster.level}</span>
-                  </div>
-                  
-                  <div className="mb-2">
-                    <div className="flex justify-between text-sm text-gray-600 mb-1">
-                      <span>Probabilité</span>
-                      <span>{result.probability.toFixed(2)}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-indigo-500 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min(result.probability, 100)}%` }}
-                      ></div>
-                    </div>
-                  </div>
+        {/* Paramètres des monstres et de l'or */}
+        <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
+          <button
+            onClick={() => setShowMonsterParams(prev => !prev)}
+            className="flex items-center justify-between w-full"
+          >
+            <div className="flex items-center gap-2">
+              <Settings2 className="text-gray-600" size={22} />
+              <h2 className="text-xl font-semibold text-gray-700">Paramètres des monstres et de l'or</h2>
+            </div>
+            {showMonsterParams ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+          </button>
 
-                  {result.monster.groups && (
-                    <div className="text-xs text-gray-500">
-                      Peut apparaître en groupe ({result.monster.groups.length} variantes)
-                    </div>
-                  )}
+          {showMonsterParams && (
+            <div className="mt-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 max-w-md">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Or de base</label>
+                  <input
+                    type="number"
+                    value={baseGold}
+                    onChange={(e) => setBaseGold(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Or aléatoire (max)</label>
+                  <input
+                    type="number"
+                    value={randomGoldMax}
+                    onChange={(e) => setRandomGoldMax(parseInt(e.target.value) || 0)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="overflow-x-auto max-h-96 overflow-y-auto border rounded-lg">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-100 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-700">Monstre</th>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-700">Zones</th>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-700">Niveau</th>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-700">XP</th>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-700">Bonus XP</th>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-700">Odds</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(Object.keys(monsterList) as Monster[]).map(id => {
+                      const m = monsterList[id];
+                      const o = monsterOverrides[id];
+                      return (
+                        <tr key={id} className="border-t">
+                          <td className="px-3 py-1.5 text-gray-800 font-medium">{m.name}</td>
+                          <td className="px-3 py-1.5 text-gray-500 text-xs">
+                            {m.zones.map(z => ZONE_LABELS[z] ?? z).join(', ') || '—'}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number"
+                              value={o.level}
+                              onChange={(e) => updateMonsterOverride(id, 'level', parseInt(e.target.value) || 0)}
+                              className="w-16 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number"
+                              value={o.xp}
+                              onChange={(e) => updateMonsterOverride(id, 'xp', parseInt(e.target.value) || 0)}
+                              className="w-16 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number"
+                              value={o.xpBonus}
+                              onChange={(e) => updateMonsterOverride(id, 'xpBonus', parseInt(e.target.value) || 0)}
+                              className="w-16 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="number"
+                              value={o.odds}
+                              onChange={(e) => updateMonsterOverride(id, 'odds', parseInt(e.target.value) || 0)}
+                              className="w-16 px-2 py-1 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Sélecteur de métrique + graphiques */}
+        {calculatedZones.length > 0 && (
+          <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
+              <h2 className="text-2xl font-bold text-gray-800">Gains moyens par Dinoz, par niveau</h2>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="metric"
+                    checked={displayMetric === 'xp'}
+                    onChange={() => setDisplayMetric('xp')}
+                    className="accent-indigo-600"
+                  />
+                  <span className="text-sm font-medium text-gray-700">XP</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="metric"
+                    checked={displayMetric === 'gold'}
+                    onChange={() => setDisplayMetric('gold')}
+                    className="accent-indigo-600"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Or</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {calculatedZones.map(zone => (
+                <div key={zone} className="border rounded-xl p-4">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-3">{ZONE_LABELS[zone] ?? zone}</h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={plotData[zone]} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis
+                        dataKey="level"
+                        label={{ value: 'Niveau moyen du groupe', position: 'insideBottom', offset: -5 }}
+                        tick={{ fontSize: 12 }}
+                      />
+                      <YAxis
+                        label={{ value: displayMetric === 'xp' ? 'XP / Dinoz' : 'Or / Dinoz', angle: -90, position: 'insideLeft' }}
+                        tick={{ fontSize: 12 }}
+                      />
+                      <Tooltip />
+                      <Legend />
+                      {calculatedGroupSizes.map(size => (
+                        <Line
+                          key={size}
+                          type="monotone"
+                          dataKey={`g${size}_${displayMetric}`}
+                          name={`${size} Dinoz`}
+                          stroke={GROUP_COLORS[size]}
+                          strokeWidth={2}
+                          dot={(dotProps: any) => {
+                            const { cx, cy, payload, index } = dotProps;
+                            return (
+                              <circle
+                                key={`dot-${zone}-${size}-${index}`}
+                                cx={cx}
+                                cy={cy}
+                                r={3.5}
+                                fill={GROUP_COLORS[size]}
+                                stroke="#fff"
+                                strokeWidth={1}
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => handlePointClick(zone, size, payload.level)}
+                              />
+                            );
+                          }}
+                          activeDot={{ r: 6 }}
+                          isAnimationActive={false}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
               ))}
             </div>
-
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="flex items-start gap-2">
-                <Info className="text-blue-600 mt-0.5" size={16} />
-                <div className="text-sm text-blue-800">
-                  <p className="font-semibold mb-1">Note sur les probabilités individuelles :</p>
-                  <p>Ces pourcentages représentent la probabilité qu'un monstre soit <strong>sélectionné</strong> lors de chaque tirage, pas la probabilité finale d'apparition dans la composition. Un même monstre peut être tiré plusieurs fois selon le système de groupes et le niveau de puissance requis.</p>
-                </div>
-              </div>
-            </div>
+            <p className="text-xs text-gray-500 mt-4">
+              Cliquez sur un point pour lancer une simulation détaillée des compositions à ce niveau.
+            </p>
           </div>
         )}
 
-          {/* Gains globaux */}
-          {compositionResults.size > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
-                  <h2 className="text-2xl font-bold text-gray-800 mb-6">Gains moyens sur les {totalResult} tirages toutes composition confondues</h2>
-                  <div className="bg-white border-t px-4 py-3">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                          <div className="text-center">
-                              <div className="text-sm text-gray-600">Gold moyen</div>
-                              <div className="text-lg font-bold text-yellow-600">
-                                  {averageGold.toLocaleString()}
-                              </div>
-                          </div>
-
-                          <div className="text-center">
-                              <div className="text-sm text-gray-600">XP totale moyenne</div>
-                              <div className="text-lg font-bold text-green-600">
-                                  {averageTotalXP.toLocaleString()}
-                              </div>
-                          </div>
-
-                          <div className="text-center">
-                              <div className="text-sm text-gray-600">XP moyenne/Dinoz</div>
-                              <div className="text-sm font-medium text-green-700">
-                                  {Math.round(averageTotalXP / team.length).toLocaleString()}
-                              </div>
-                          </div>
-                      </div>
-
-
-                  </div>
-              </div>
-          )}
-        {/* Résultats de simulation */}
-        {compositionResults.size > 0 && (
+        {/* Détail du point cliqué */}
+        {selectedPoint && (
           <div className="bg-white rounded-xl shadow-lg p-8 mb-6">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Compositions les plus probables</h2>
-            
-            {/* Composition ciblée */}
-            {targetComposition.length > 0 && (
-              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-lg mb-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <Target className="text-indigo-600" size={24} />
-                  <h3 className="text-lg font-semibold text-gray-800">Composition ciblée</h3>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-800">
+                Détail — {ZONE_LABELS[selectedPoint.zone] ?? selectedPoint.zone}, {selectedPoint.groupSize} Dinoz, niveau {selectedPoint.level}
+              </h2>
+              <button
+                onClick={() => { setSelectedPoint(null); setPointResults(null); }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            {isSimulatingPoint && (
+              <div className="text-center text-gray-500 py-8">Simulation en cours…</div>
+            )}
+
+            {!isSimulatingPoint && pointResults && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                    <div className="text-sm text-gray-600">Or moyen (équipe)</div>
+                    <div className="text-xl font-bold text-yellow-600">{Math.round(pointAvgGold).toLocaleString()}</div>
+                  </div>
+                  <div className="bg-green-50 p-4 rounded-lg text-center">
+                    <div className="text-sm text-gray-600">XP totale moyenne (équipe)</div>
+                    <div className="text-xl font-bold text-green-600">{Math.round(pointAvgXP).toLocaleString()}</div>
+                  </div>
                 </div>
-                
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {targetComposition.map(monsterId => {
-                    const monster = monsterList[monsterId];
+
+                <h3 className="text-lg font-semibold text-gray-700 mb-3">Compositions les plus probables</h3>
+                <div className="grid grid-cols-1 gap-3">
+                  {sortedPointCompositions.map(([composition, data], index) => {
+                    const probability = pointTotal > 0 ? (data.count / pointTotal) * 100 : 0;
+                    const monsterNames = composition === '(aucun monstre)'
+                      ? ['Aucun monstre']
+                      : composition.split(',').map(id => monsterList[id as Monster]?.name ?? id);
+
                     return (
-                      <span key={monsterId} className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-sm">
-                        {monster.name}
-                      </span>
+                      <div key={composition} className="bg-gray-50 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between p-4">
+                          <div className="flex items-center gap-4">
+                            <span className="text-lg font-bold text-gray-500 w-8">#{index + 1}</span>
+                            <div className="flex flex-wrap gap-2">
+                              {monsterNames.map((name, i) => (
+                                <span key={i} className="bg-white px-3 py-1 rounded-full text-sm font-medium border">
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-bold text-gray-800">{probability.toFixed(3)}%</div>
+                            <div className="text-sm text-gray-500">{data.count}/{pointTotal}</div>
+                          </div>
+                        </div>
+                        <div className="bg-white border-t px-4 py-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="text-center">
+                            <div className="text-sm text-gray-600">Or moyen</div>
+                            <div className="text-lg font-bold text-yellow-600">{data.avgGold.toLocaleString()}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-sm text-gray-600">XP totale moyenne</div>
+                            <div className="text-lg font-bold text-green-600">{data.avgTotalXP.toLocaleString()}</div>
+                          </div>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                  <div className="bg-white p-4 rounded-lg">
-                    <div className="text-sm text-gray-600">Probabilité</div>
-                    <div className="text-xl font-bold text-indigo-700">
-                      {getTargetCompositionProbability().toFixed(4)}%
-                    </div>
-                  </div>
-                  
-                  {getTargetCompositionRewards() && (
-                    <>
-                      <div className="bg-white p-4 rounded-lg">
-                        <div className="text-sm text-gray-600">Gold moyen</div>
-                        <div className="text-xl font-bold text-yellow-600">
-                          {getTargetCompositionRewards()!.avgGold.toLocaleString()}
-                        </div>
-                      </div>
-                      
-                      <div className="bg-white p-4 rounded-lg">
-                        <div className="text-sm text-gray-600">XP totale moyenne</div>
-                        <div className="text-xl font-bold text-green-600">
-                          {getTargetCompositionRewards()!.avgTotalXP.toLocaleString()}
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {getTargetCompositionRewards() && (
-                  <div className="bg-white p-4 rounded-lg">
-                    <div className="text-sm font-semibold text-gray-700 mb-2">XP moyenne par Dinoz:</div>
-                    <div className="flex flex-wrap gap-2">
-                      {getTargetCompositionRewards()!.avgTeamXP.map((dinozXP, i) => (
-                        <span key={i} className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm">
-                          Dinoz {i + 1} (Niv.{dinozXP.level}): {dinozXP.avgXP} XP
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                <div className="text-sm text-gray-600 mt-4">
-                  Cliquez sur les monstres dans la section "Probabilités individuelles" pour créer votre composition ciblée
-                </div>
-              </div>
+              </>
             )}
-
-            <div className="grid grid-cols-1 gap-3">
-              {sortedCompositions.map(([composition, data], index) => {
-                const total = Array.from(compositionResults.values()).reduce((sum, val) => sum + val.count, 0);
-                const probability = (data.count / total) * 100;
-                const monsters = composition.split(',').map(id => monsterList[id as Monster]);
-                
-                return (
-                  <div key={composition} className="bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors overflow-hidden">
-                    <div className="flex items-center justify-between p-4">
-                      <div className="flex items-center gap-4">
-                        <span className="text-lg font-bold text-gray-500 w-8">#{index + 1}</span>
-                        <div className="flex flex-wrap gap-2">
-                          {monsters.map((monster, i) => (
-                            <span key={i} className="bg-white px-3 py-1 rounded-full text-sm font-medium border">
-                              {monster.name}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      <div className="text-right">
-                        <div className="text-lg font-bold text-gray-800">{probability.toFixed(3)}%</div>
-                        <div className="text-sm text-gray-500">{data.count}/{total}</div>
-                      </div>
-                    </div>
-                    
-                    {/* Récompenses */}
-                    <div className="bg-white border-t px-4 py-3">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
-                        <div className="text-center">
-                          <div className="text-sm text-gray-600">Gold moyen</div>
-                          <div className="text-lg font-bold text-yellow-600">
-                            {data.avgGold.toLocaleString()}
-                          </div>
-                        </div>
-                        
-                        <div className="text-center">
-                          <div className="text-sm text-gray-600">XP totale moyenne</div>
-                          <div className="text-lg font-bold text-green-600">
-                            {data.avgTotalXP.toLocaleString()}
-                          </div>
-                        </div>
-                        
-                        <div className="text-center">
-                          <div className="text-sm text-gray-600">XP moyenne/Dinoz</div>
-                          <div className="text-sm font-medium text-green-700">
-                            {Math.round(data.avgTotalXP / team.length).toLocaleString()}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="text-center">
-                        <div className="text-xs text-gray-600 mb-1">XP détaillée par Dinoz:</div>
-                        <div className="flex flex-wrap justify-center gap-1">
-                          {data.avgTeamXP.map((dinozXP, i) => (
-                            <span key={i} className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
-                              D{i + 1} (Niv.{dinozXP.level}): {dinozXP.avgXP}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="mt-4 text-sm text-gray-600 text-center">
-              Simulation basée sur {simulationIterations.toLocaleString()} itérations - 
-              {compositionResults.size} compositions uniques trouvées
-            </div>
           </div>
         )}
 
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <div className="text-sm text-yellow-800">
-            <strong>Informations importantes :</strong>
-            <ul className="list-disc list-inside mt-2 space-y-1">
-              <li>Les <strong>probabilités individuelles</strong> montrent la chance de sélection de chaque monstre lors d'un tirage</li>
-              <li>La <strong>simulation de compositions</strong> génère des combats complets et calcule les probabilités réelles d'apparition</li>
-              <li>Le système de groupes peut faire apparaître plusieurs instances du même monstre</li>
-              <li>Plus d'itérations = résultats plus précis (mais calcul plus long)</li>
-            </ul>
+            <div className="flex items-start gap-2">
+              <Info className="mt-0.5 flex-shrink-0" size={16} />
+              <ul className="list-disc list-inside space-y-1">
+                <li>Pour chaque zone, taille de groupe et niveau, tous les Dinoz du groupe sont au même niveau (= niveau moyen).</li>
+                <li>Les graphiques affichent les gains <strong>moyens par Dinoz</strong> sur le nombre d'itérations choisi.</li>
+                <li>Un clic sur un point relance une simulation détaillée des compositions pour ce point précis.</li>
+                <li>Les paramètres de monstres et d'or sont modifiables et s'appliquent immédiatement au prochain calcul.</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
