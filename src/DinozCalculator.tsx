@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Calculator, Map as MapIcon, Settings2, Info, ChevronDown, ChevronUp, X } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
@@ -1212,6 +1212,7 @@ export default function DinozCalculator() {
   const [showMonsterParams, setShowMonsterParams] = useState(false);
 
   const [displayMetric, setDisplayMetric] = useState<'xp' | 'gold'>('xp');
+  const [visibleGroupSizes, setVisibleGroupSizes] = useState<number[]>([]);
 
   const [plotData, setPlotData] = useState<Record<string, PlotPoint[]>>({});
   const [calculatedZones, setCalculatedZones] = useState<MapZone[]>([]);
@@ -1244,6 +1245,15 @@ export default function DinozCalculator() {
   };
 
   const selectAllGroupSizes = () => setSelectedGroupSizes([...GROUP_SIZES]);
+
+  const toggleVisibleGroupSize = (size: number) => {
+    setVisibleGroupSizes(prev =>
+      prev.includes(size) ? prev.filter(s => s !== size) : [...prev, size].sort((a, b) => a - b)
+    );
+  };
+
+  const showAllVisibleGroupSizes = () => setVisibleGroupSizes([...calculatedGroupSizes]);
+  const hideAllVisibleGroupSizes = () => setVisibleGroupSizes([]);
 
   const updateMonsterOverride = (id: string, field: keyof MonsterOverride, value: number) => {
     setMonsterOverrides(prev => ({
@@ -1298,6 +1308,7 @@ export default function DinozCalculator() {
     setPlotData(newPlotData);
     setCalculatedZones(zones);
     setCalculatedGroupSizes(sizes);
+    setVisibleGroupSizes(sizes);
     setIsCalculating(false);
   };
 
@@ -1622,6 +1633,46 @@ export default function DinozCalculator() {
               </div>
             </div>
 
+            <div className="flex items-center justify-between flex-wrap gap-3 mb-6 pb-4 border-b">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-medium text-gray-600 mr-1">Afficher :</span>
+                {calculatedGroupSizes.map(size => (
+                  <label
+                    key={size}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors ${
+                      visibleGroupSizes.includes(size) ? 'border-2' : 'bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100'
+                    }`}
+                    style={visibleGroupSizes.includes(size) ? {
+                      backgroundColor: `${GROUP_COLORS[size]}1a`,
+                      borderColor: GROUP_COLORS[size],
+                      color: GROUP_COLORS[size]
+                    } : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleGroupSizes.includes(size)}
+                      onChange={() => toggleVisibleGroupSize(size)}
+                    />
+                    <span className="text-sm font-medium">{size} Dinoz</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={showAllVisibleGroupSizes}
+                  className="text-sm px-3 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 font-medium"
+                >
+                  Tout afficher
+                </button>
+                <button
+                  onClick={hideAllVisibleGroupSizes}
+                  className="text-sm px-3 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 font-medium"
+                >
+                  Tout masquer
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {calculatedZones.map(zone => (
                 <div key={zone} className="border rounded-xl p-4">
@@ -1640,7 +1691,7 @@ export default function DinozCalculator() {
                       />
                       <Tooltip />
                       <Legend />
-                      {calculatedGroupSizes.map(size => (
+                      {calculatedGroupSizes.filter(size => visibleGroupSizes.includes(size)).map(size => (
                         <Line
                           key={size}
                           type="monotone"
